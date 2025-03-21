@@ -28,8 +28,6 @@ ENV/
 # Model files (có thể rất lớn)
 *.ipynb
 *.pth
-models/train/weights/
-
 # MLflow
 mlruns/
 mlflow.db
