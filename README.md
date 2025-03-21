@@ -50,3 +50,12 @@ docker-compose -f docker/docker-compose.yml up -d
 2. Tải lên ảnh MRI não
 3. Điều chỉnh ngưỡng tin cậy nếu cần
 4. Xem kết quả phát hiện
+
+### Huấn Luyện Mô Hình
+Để huấn luyện mô hình với dữ liệu của riêng bạn:
+1. Chuẩn bị dữ liệu theo định dạng YOLO
+2. Cập nhật file data.yaml
+3. Chạy script huấn luyện:
+```bash
+python src/train.py --epochs 50 --batch-size 16
+```
