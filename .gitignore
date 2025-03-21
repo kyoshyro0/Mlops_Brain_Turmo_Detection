@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+.env
+
+# Model files (có thể rất lớn)
+*.ipynb
+*.pth
+models/train/weights/
+
+# MLflow
+mlruns/
+mlflow.db
+
+# Logs
+logs/
+*.log
+
+# Dataset (thường rất lớn)
+data_test/
+datasets/
+*.jpg
+*.jpeg
+*.png
+!examples/*.jpg
+!examples/*.jpeg
+!examples/*.png
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker
+.dockerignore
+
+# Misc
+.DS_Store
+Thumbs.db

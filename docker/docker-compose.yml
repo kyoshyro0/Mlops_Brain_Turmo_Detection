@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    container_name: brain-tumor-detection-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../models/train/weights:/app/models/train/weights
+    restart: unless-stopped
+    environment:
+      - PYTHONPATH=/app
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+    container_name: brain-tumor-detection-ui
+    ports:
+      - "8501:8501"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    environment:
+      - API_URL=http://backend:8000

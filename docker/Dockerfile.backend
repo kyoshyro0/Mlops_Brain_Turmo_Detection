@@ -1,0 +1,38 @@
+FROM python:3.10-slim  # Sử dụng image Python 3.10 phiên bản nhẹ làm cơ sở
+
+WORKDIR /app  # Thiết lập thư mục làm việc trong container là /app
+
+# Cài đặt các dependencies cần thiết cho OpenCV và các thư viện đồ họa
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1-mesa-glx \  # Thư viện đồ họa cần thiết cho OpenCV
+    libglib2.0-0 \     # Thư viện GLib cần thiết cho nhiều ứng dụng
+    && rm -rf /var/lib/apt/lists/*  # Xóa cache apt để giảm kích thước image
+
+# Cài đặt các thư viện Python cần thiết từ file requirements
+COPY requirements.backend.txt .  # Sao chép file requirements vào container
+RUN pip install --no-cache-dir -r requirements.backend.txt  # Cài đặt các thư viện Python
+
+# Tạo cấu trúc thư mục cho model
+RUN mkdir -p /app/models/train/weights  # Tạo thư mục để lưu trữ model
+
+# Sao chép mã nguồn và file cấu hình
+COPY src/ /app/src/  # Sao chép thư mục src vào container
+COPY data.yaml /app/data.yaml  # Sao chép file cấu hình data.yaml
+
+# Sao chép model PyTorch
+COPY models/train/weights/best.pt /app/models/train/weights/best.pt  # Sao chép model PyTorch
+
+# Sao chép model ONNX nếu có
+COPY models/train/weights/best.onnx /app/models/train/weights/best.onnx || true  # Sao chép model ONNX (không báo lỗi nếu không tồn tại)
+
+# Thiết lập biến môi trường
+ENV PYTHONPATH=/app  # Thiết lập PYTHONPATH để Python có thể tìm thấy các module
+
+# Mở cổng cho API
+EXPOSE 8000  # Mở cổng 8000 để API có thể truy cập từ bên ngoài container
+
+# Lệnh chạy khi container khởi động
+CMD ["python", "src/api.py"]  # Chạy file api.py khi container khởi động
+
+# Đảm bảo TRAINING_MODE được đặt thành False
+RUN sed -i 's/TRAINING_MODE = True/TRAINING_MODE = False/g' /app/src/model.py  # Thay đổi giá trị TRAINING_MODE trong file model.py
