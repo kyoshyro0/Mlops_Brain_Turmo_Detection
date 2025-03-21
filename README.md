@@ -4,7 +4,7 @@
 
 ## Tính năng
 
-- Phát hiện 4 loại khối u não: glioma, meningioma, pituitary và notumor
+- Phát hiện 3 loại khối u não và normal: glioma, meningioma, pituitary và notumor
 - Hỗ trợ mô hình ONNX để tăng tốc độ suy luận
 - Giao diện người dùng thân thiện với Streamlit
 - API backend sử dụng FastAPI
