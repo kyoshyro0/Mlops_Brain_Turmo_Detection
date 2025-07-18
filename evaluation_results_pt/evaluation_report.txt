@@ -1,0 +1,32 @@
+Brain Tumor Detection YOLOv11 Model Evaluation
+==========================================
+
+Model: models/train/weights/best.pt
+Data YAML: configs/data_test.yaml
+Confidence threshold: 0.25
+IoU threshold: 0.45
+
+Performance Metrics:
+mAP@0.5: 0.9950
+mAP@0.5:0.95: 0.9950
+Precision: 1.0000
+Recall: 1.0000
+F1-score: 1.0000
+
+Class-wise Metrics:
+glioma:
+  AP@0.5: 0.9950
+  AP@0.5:0.95: 0.9950
+
+meningioma:
+  AP@0.5: 0.9950
+  AP@0.5:0.95: 0.9950
+
+notumor:
+  AP@0.5: 0.9950
+  AP@0.5:0.95: 0.9950
+
+pituitary:
+  AP@0.5: 0.9950
+  AP@0.5:0.95: 0.9950
+

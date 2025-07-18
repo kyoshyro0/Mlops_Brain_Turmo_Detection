@@ -1,0 +1,17 @@
+# YOLOv11 data configuration for brain tumor detection
+
+# Train/val/test sets
+path: d:\Workspaces\Mlops_Brain_Turmo\datasets  # dataset root directory
+train: train/images  # train images (relative to 'path')
+val: test/images  # sử dụng test làm validation
+# test: test/images  # test images (relative to 'path')
+
+# Classes
+names:
+  0: glioma
+  1: meningioma
+  2: notumor
+  3: pituitary
+
+# Number of classes
+nc: 4
