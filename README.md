@@ -128,11 +128,9 @@ Một hệ thống MLOps production-grade xây dựng trên **YOLOv11s** (Ultral
 - Frontend chạy trên `python:3.12-slim`, chỉ cài Streamlit + requests + Pillow (~300MB)
 - Docker Compose orchestration cho cả 2 services
 
-### 🧪 Testing & CI/CD
+### 🧪 Testing
 
 - Test suite phân tầng: unit, integration, end-to-end
-- GitHub Actions workflow: lint → test → Docker build → container health check
-- DVC tích hợp cho data versioning
 
 ---
 
@@ -173,7 +171,6 @@ mlops_brain_turmo/
 │       └── train.py                #   CLI training entry point
 ├── tests/                          # Test suite (unit, integration, e2e)
 ├── notebooks/                      # Jupyter experiments
-├── .github/workflows/ci.yml        # GitHub Actions CI/CD
 ├── Dockerfile                      # Multi-stage Docker build (3 stages)
 ├── docker-compose.yml              # Backend + Frontend orchestration
 ├── pyproject.toml                  # Dependencies (uv/pip)
@@ -471,10 +468,8 @@ for rm in client.search_registered_models():
 | **Model Registry** | MLflow Model Registry (Custom PyFunc wrapper) |
 | **Backend API** | FastAPI 0.121 + Uvicorn |
 | **Frontend UI** | Streamlit 1.51 |
-| **Data Versioning** | DVC (Google Drive remote) |
 | **Package Manager** | uv (Astral) |
 | **Containerization** | Docker + Docker Compose (NVIDIA GPU support) |
-| **CI/CD** | GitHub Actions |
 | **Python** | 3.12+ |
 
 ---
