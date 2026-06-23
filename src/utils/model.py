@@ -1,16 +1,21 @@
+"""
+Model utilities for YOLOv11 inference and training.
+
+This module provides model loading, prediction, and training functionality
+with support for both PyTorch and ONNX Runtime backends.
+"""
+
+from typing import Union, Tuple, List, Optional
 from ultralytics import YOLO
 import numpy as np
 import os
+import torch
+import mlflow
+import mlflow.pytorch
 
-# Điều kiện hóa việc import pytorch và mlflow
-TRAINING_MODE = False  # Đặt thành False khi triển khai, True khi huấn luyện
+from src.config import CLASS_NAMES, MLFLOW_TRACKING_URI
 
-if TRAINING_MODE:
-    import torch
-    import mlflow
-    import mlflow.pytorch
-
-# Kiểm tra xem onnxruntime có được cài đặt không
+# Check if ONNX Runtime is available
 try:
     import onnxruntime as ort
     import cv2
@@ -18,42 +23,65 @@ try:
 except ImportError:
     ONNX_AVAILABLE = False
 
-def load_model(model_path='yolo11s.pt'):
-    """Tải mô hình YOLOv11s.
+
+def load_model(model_path: str = 'yolo11s.pt') -> Union['YOLO', 'ONNXModel']:
+    """
+    Load YOLOv11s model from checkpoint or ONNX export.
     
     Args:
-        model_path (str): Đường dẫn đến trọng số mô hình
+        model_path: Path to model weights (.pt) or ONNX export (.onnx)
         
     Returns:
-        YOLO or ONNXModel: Mô hình đã tải
+        Loaded model instance (YOLO or ONNXModel)
+        
+    Raises:
+        Exception: If model loading fails
     """
     try:
-        # Kiểm tra xem mô hình có định dạng ONNX và onnxruntime có sẵn không
+        # Load ONNX model if runtime is available and format matches
         if model_path.endswith('.onnx') and ONNX_AVAILABLE:
             return ONNXModel(model_path)
         else:
             model = YOLO(model_path)
             return model
     except Exception as e:
-        raise Exception(f"Lỗi khi tải mô hình: {str(e)}")
+        raise Exception(f"Model loading failed: {str(e)}")
 
-def train_model(data_yaml, epochs=100, imgsz=640, batch_size=16, resume=False, resume_path=None, run_id=None):
-    """Huấn luyện mô hình YOLOv11s với các tham số được chỉ định.
+
+def train_model(
+    data_yaml: str,
+    epochs: int = 100,
+    imgsz: int = 640,
+    batch_size: int = 16,
+    resume: bool = False,
+    resume_path: Optional[str] = None,
+    run_id: Optional[str] = None,
+) -> Tuple:
+    """
+    Train YOLOv11s model with MLflow tracking.
+
+    Training outputs are saved locally at models/train/weights/best.pt.
+    The best checkpoint is also logged as an MLflow artifact.
+    Registration to MLflow Model Registry is handled separately by the
+    pipeline orchestrator after validation and ONNX export.
 
     Args:
-        data_yaml (str): Đường dẫn đến file cấu hình dữ liệu YAML
-        epochs (int): Số lượng epoch huấn luyện
-        imgsz (int): Kích thước ảnh đầu vào
-        batch_size (int): Kích thước batch cho huấn luyện
-        resume (bool): Có tiếp tục huấn luyện từ checkpoint không
-        resume_path (str): Đường dẫn đến checkpoint để tiếp tục
-        run_id (str): ID của MLflow run để tiếp tục ghi log
+        data_yaml: Path to dataset configuration YAML file
+        epochs: Number of training epochs
+        imgsz: Input image size
+        batch_size: Training batch size
+        resume: Whether to resume from checkpoint
+        resume_path: Path to checkpoint for resuming
+        run_id: MLflow run ID for continuing logging
 
     Returns:
-        tuple: Kết quả huấn luyện và run ID
+        Tuple of (training results, MLflow run ID)
+
+    Raises:
+        Exception: If training fails
     """
     try:
-        # Khởi tạo mô hình
+        # Initialize model
         if resume and resume_path:
             model = YOLO(resume_path)
         elif resume:
@@ -61,10 +89,10 @@ def train_model(data_yaml, epochs=100, imgsz=640, batch_size=16, resume=False, r
         else:
             model = YOLO('yolo11s.pt')
 
-        # Thiết lập MLflow tracking
-        mlflow.set_tracking_uri("sqlite:///mlflow.db")
-        
-        # Nếu run_id được cung cấp, lấy experiment ID cho run đó
+        # Setup MLflow tracking
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+
+        # Resume existing run or create new experiment
         if run_id:
             try:
                 run_info = mlflow.get_run(run_id)
@@ -72,85 +100,103 @@ def train_model(data_yaml, epochs=100, imgsz=640, batch_size=16, resume=False, r
                 experiment = mlflow.get_experiment(experiment_id)
                 mlflow.set_experiment(experiment.name)
             except Exception as e:
-                print(f"Cảnh báo: Không thể thiết lập experiment từ run_id: {str(e)}")
-                print("Tạo một run mới thay thế.")
+                print(f"Warning: Cannot set experiment from run_id: {str(e)}")
+                print("Creating new run instead.")
                 run_id = None
         else:
             mlflow.set_experiment("brain_tumor_detection")
 
-        # Bật tự động ghi log
+        # Enable auto-logging
         mlflow.pytorch.autolog()
 
-        # Bắt đầu hoặc tiếp tục MLflow run
-        if run_id:
-            with mlflow.start_run(run_id=run_id) as run:
-                # Huấn luyện mô hình
-                results = model.train(
-                    data=data_yaml,
-                    epochs=epochs,
-                    imgsz=imgsz,
-                    batch=batch_size,
-                    device=0 if torch.cuda.is_available() else 'cpu',
-                    verbose=False,
-                    project='models',
-                    name=None,
-                    exist_ok=True,
-                    resume=resume
-                )
-                return results, run.info.run_id
-        else:
-            with mlflow.start_run() as run:
-                # Huấn luyện mô hình
-                results = model.train(
-                    data=data_yaml,
-                    epochs=epochs,
-                    imgsz=imgsz,
-                    batch=batch_size,
-                    device=0 if torch.cuda.is_available() else 'cpu',
-                    verbose=False,
-                    project='models',
-                    name=None,
-                    exist_ok=True,
-                    resume=resume
-                )
-                return results, run.info.run_id
+        # Train inside an MLflow run
+        with mlflow.start_run(run_id=run_id) as run:
+            active_run_id = run.info.run_id
+
+            results = model.train(
+                data=data_yaml,
+                epochs=epochs,
+                imgsz=imgsz,
+                batch=batch_size,
+                device=0 if torch.cuda.is_available() else 'cpu',
+                verbose=False,
+                project='models',
+                name=None,
+                exist_ok=True,
+                resume=resume
+            )
+
+            # Log key metrics from training results
+            try:
+                metrics = results.results_dict
+                mlflow.log_metrics({
+                    "mAP50":     metrics.get("metrics/mAP50(B)", 0),
+                    "mAP50_95":  metrics.get("metrics/mAP50-95(B)", 0),
+                    "precision": metrics.get("metrics/precision(B)", 0),
+                    "recall":    metrics.get("metrics/recall(B)", 0),
+                })
+            except Exception:
+                pass  # metrics logging is best-effort
+
+            # Log best.pt as artifact
+            best_pt_path = os.path.join("models", "train", "weights", "best.pt")
+            if os.path.exists(best_pt_path):
+                mlflow.log_artifact(best_pt_path, artifact_path="weights")
+                print(f"✅ Logged artifact: {best_pt_path}")
+            else:
+                print(f"⚠️  best.pt not found at {best_pt_path}")
+
+        return results, active_run_id
 
     except Exception as e:
-        raise Exception(f"Lỗi trong quá trình huấn luyện: {str(e)}")
+        raise Exception(f"Training failed: {str(e)}")
 
-def predict(model, image, conf_thres=0.25):
-    """Thực hiện dự đoán trên một ảnh.
 
+
+def predict(model, image: np.ndarray, conf_thres: float = 0.25):
+    """
+    Run inference on an image.
+    
     Args:
-        model: Mô hình YOLO hoặc ONNXModel đã tải
-        image: Ảnh đầu vào (mảng numpy)
-        conf_thres (float): Ngưỡng tin cậy
-
+        model: Loaded YOLO or ONNXModel instance
+        image: Input image (numpy array)
+        conf_thres: Confidence threshold for detections
+        
     Returns:
-        Results: Kết quả dự đoán của YOLO
+        YOLO Results object with detections
+        
+    Raises:
+        Exception: If prediction fails
     """
     try:
         results = model(image, conf=conf_thres)
         return results
     except Exception as e:
         import traceback
-        print(f"Lỗi chi tiết trong hàm dự đoán:")
+        print(f"Detailed prediction error:")
         traceback.print_exc()
-        raise Exception(f"Lỗi trong quá trình dự đoán: {str(e)}")
+        raise Exception(f"Prediction failed: {str(e)}")
 
-# Thêm lớp ONNXModel chỉ khi onnxruntime có sẵn
+
+# ONNX Model wrapper (only available if onnxruntime is installed)
 if ONNX_AVAILABLE:
     class ONNXModel:
-        """Wrapper cho mô hình ONNX Runtime để duy trình tính tương thích với API của YOLO"""
+        """
+        ONNX Runtime wrapper for YOLO model inference.
         
-        # Định nghĩa các lớp Box, Boxes và Results ở cấp độ lớp
+        Provides YOLO-compatible API for ONNX exported models with
+        optimized inference using ONNX Runtime.
+        """
+        
         class Box:
+            """Bounding box representation."""
             def __init__(self, xyxy, conf, cls):
                 self.xyxy = xyxy
                 self.conf = conf
                 self.cls = cls
         
         class Boxes:
+            """Collection of bounding boxes."""
             def __init__(self):
                 self.xyxy = []
                 self.conf = []
@@ -158,20 +204,21 @@ if ONNX_AVAILABLE:
                 self._len = 0
                 
             def append(self, box):
+                """Add a box to the collection."""
                 try:
-                    # Xử lý xyxy
+                    # Store box coordinates
                     if isinstance(box.xyxy, np.ndarray):
                         self.xyxy.append(box.xyxy)
                     else:
                         self.xyxy.append(np.array([box.xyxy]))
                         
-                    # Xử lý conf
+                    # Store confidence scores
                     if isinstance(box.conf, np.ndarray):
                         self.conf.append(box.conf)
                     else:
                         self.conf.append(np.array([box.conf]))
                         
-                    # Xử lý cls
+                    # Store class IDs
                     if isinstance(box.cls, np.ndarray):
                         self.cls.append(box.cls)
                     else:
@@ -179,13 +226,13 @@ if ONNX_AVAILABLE:
                         
                     self._len += 1
                 except Exception as e:
-                    print(f"Lỗi khi thêm box: {str(e)}")
+                    print(f"Error adding box: {str(e)}")
             
             def __len__(self):
                 return self._len
             
             def __iter__(self):
-                # Tạo một iterator giả để hỗ trợ lặp qua boxes
+                """Enable iteration over boxes."""
                 class BoxIterator:
                     def __init__(self, boxes):
                         self.boxes = boxes
@@ -195,14 +242,14 @@ if ONNX_AVAILABLE:
                         return self
                         
                     def __next__(self):
-                        if self.index < len(self.boxes):
+                        while self.index < len(self.boxes):
                             try:
-                                # Đảm bảo dữ liệu có định dạng đúng
+                                # Extract box data
                                 xyxy = self.boxes.xyxy[self.index]
                                 conf = self.boxes.conf[self.index]
                                 cls = self.boxes.cls[self.index]
                                 
-                                # Kiểm tra và chuyển đổi dữ liệu nếu cần
+                                # Convert to numpy arrays if needed
                                 if isinstance(xyxy, list):
                                     xyxy = np.array(xyxy)
                                 if isinstance(conf, list):
@@ -214,156 +261,165 @@ if ONNX_AVAILABLE:
                                 self.index += 1
                                 return box
                             except Exception as e:
-                                print(f"Lỗi trong __next__ tại index {self.index}: {str(e)}")
+                                print(f"Error in iterator at index {self.index}: {str(e)}")
                                 self.index += 1
-                                # Nếu có lỗi, thử box tiếp theo
-                                return self.__next__()
+                                continue
                         raise StopIteration
                 
                 return BoxIterator(self)
         
         class Results:
+            """YOLO-compatible results object."""
             def __init__(self, boxes, names):
                 self.boxes = boxes
                 self.names = names
         
-        def __init__(self, model_path):
-            """Khởi tạo mô hình ONNX
+        def __init__(self, model_path: str):
+            """
+            Initialize ONNX model for inference.
             
             Args:
-                model_path (str): Đường dẫn đến mô hình ONNX
+                model_path: Path to ONNX model file
+                
+            Raises:
+                FileNotFoundError: If model file doesn't exist
             """
-            # Kiểm tra xem mô hình ONNX có tồn tại không
+            # Verify model exists
             if not os.path.exists(model_path):
-                raise FileNotFoundError(f"Không tìm thấy mô hình ONNX: {model_path}")
+                raise FileNotFoundError(f"ONNX model not found: {model_path}")
             
-            # Tạo session ONNX Runtime
+            # Create ONNX Runtime session with GPU support
             self.session = ort.InferenceSession(
                 model_path, 
                 providers=['CUDAExecutionProvider', 'CPUExecutionProvider']
             )
             
-            # Lấy metadata của mô hình
+            # Get model metadata
             self.input_name = self.session.get_inputs()[0].name
             self.output_names = [output.name for output in self.session.get_outputs()]
             
-            # Lấy shape đầu vào
+            # Parse input shape
             self.input_shape = self.session.get_inputs()[0].shape
             
-            # Đảm bảo img_size là tuple với các số nguyên
+            # Extract image size from model input shape
             try:
                 height = int(self.input_shape[-2]) if isinstance(self.input_shape[-2], (int, float, str)) else 640
                 width = int(self.input_shape[-1]) if isinstance(self.input_shape[-1], (int, float, str)) else 640
-                self.img_size = (height, width)  # Height, width
+                self.img_size = (height, width)
             except (ValueError, TypeError, IndexError):
-                # Fallback to default size if there's any error
                 self.img_size = (640, 640)
-                print("Cảnh báo: Không thể xác định kích thước đầu vào từ mô hình ONNX, sử dụng mặc định (640, 640)")
+                print("Warning: Cannot parse input size from ONNX model, using default (640, 640)")
             
-            # Tên các lớp cho phát hiện khối u não
-            self.names = {0: 'glioma', 1: 'meningioma', 2: 'notumor', 3: 'pituitary'}
+            # Class names from centralized config
+            self.names = CLASS_NAMES
         
-        def __call__(self, img, conf=0.25):
-            """Chạy dự đoán trên ảnh
+        def __call__(self, img: np.ndarray, conf: float = 0.25):
+            """
+            Run inference on image.
             
             Args:
-                img: Ảnh đầu vào (mảng numpy)
-                conf (float): Ngưỡng tin cậy
+                img: Input image (numpy array)
+                conf: Confidence threshold for detections
                 
             Returns:
-                Results: Kết quả tương thích với YOLO
+                YOLO-compatible Results object
             """
-            # Tiền xử lý ảnh
+            # Preprocess image
             input_data = self._preprocess(img)
             
-            # Chạy dự đoán
+            # Run inference
             outputs = self.session.run(self.output_names, {self.input_name: input_data})
             
-            # Hậu xử lý kết quả
+            # Postprocess results
             results = self._postprocess(outputs, img, conf)
             
             return results
         
-        def _preprocess(self, img):
-            """Tiền xử lý ảnh cho mô hình ONNX
+        def _preprocess(self, img: np.ndarray) -> np.ndarray:
+            """
+            Preprocess image for ONNX model inference.
             
             Args:
-                img: Ảnh đầu vào
+                img: Input image
                 
             Returns:
-                numpy.ndarray: Ảnh đã xử lý
+                Preprocessed image tensor
             """
-            # Chuyển đổi sang RGB nếu cần
+            # Convert to RGB if needed
             if len(img.shape) == 2:
                 img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
             elif img.shape[2] == 4:
                 img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
             
-            # Resize - Đảm bảo kích thước là tuple với các số nguyên
-            # Kiểm tra và đảm bảo self.img_size chứa các số nguyên
+            # Resize to model input size
             try:
                 width = int(self.img_size[1])
                 height = int(self.img_size[0])
             except (ValueError, TypeError):
-                # Nếu không thể chuyển đổi, sử dụng kích thước mặc định
                 width, height = 640, 640
                 
             img_resized = cv2.resize(img, (width, height), interpolation=cv2.INTER_LINEAR)
             
-            # Chuẩn hóa
+            # Normalize to [0, 1]
             img_norm = img_resized.astype(np.float32) / 255.0
             
-            # HWC sang NCHW
+            # Convert HWC to CHW format
             img_transposed = img_norm.transpose(2, 0, 1)
             
-            # Thêm chiều batch
+            # Add batch dimension
             img_batch = np.expand_dims(img_transposed, axis=0)
             
             return img_batch
         
-        def _postprocess(self, outputs, original_img, conf_threshold):
-            """Hậu xử lý đầu ra của mô hình ONNX
+        def _postprocess(
+            self,
+            outputs: List[np.ndarray],
+            original_img: np.ndarray,
+            conf_threshold: float
+        ) -> List:
+            """
+            Postprocess ONNX model outputs to YOLO format.
             
             Args:
-                outputs: Đầu ra của mô hình ONNX
-                original_img: Ảnh đầu vào gốc
-                conf_threshold: Ngưỡng tin cậy
+                outputs: Raw ONNX model outputs
+                original_img: Original input image
+                conf_threshold: Confidence threshold
                 
             Returns:
-                list: Danh sách các đối tượng Results
+                List of Results objects
             """
-            # Xử lý các phát hiện
+            # Extract detections from output
             detections = outputs[0]
             
-            # Khởi tạo boxes
+            # Initialize boxes container
             boxes = self.Boxes()
             
             try:
-                # Xử lý đầu ra dạng (1, 8, 8400) hoặc tương tự - định dạng của YOLOv8/YOLOv11 ONNX
+                # Handle YOLOv8/v11 ONNX output format: (1, 8, 8400)
                 if len(detections.shape) == 3:
-                    # Chuyển đổi từ [1, 8, 8400] sang [1, 8400, 8] để dễ xử lý
+                    # Transpose from [1, 8, 8400] to [1, 8400, 8] for easier processing
                     if detections.shape[1] <= 8 and detections.shape[2] > 100:
                         detections = detections.transpose(0, 2, 1)
                     
-                    # Lấy dữ liệu từ batch đầu tiên
-                    detections = detections[0]  # Giờ shape là [8400, 8] hoặc tương tự
+                    # Extract first batch
+                    detections = detections[0]  # Shape: [8400, 8]
                     
-                    # Lấy class scores và tìm class_id có điểm cao nhất
-                    num_classes = min(4, detections.shape[1] - 4)  # Giả sử 4 lớp đầu tiên là tọa độ
-                    class_scores = detections[:, 4:4+num_classes]  # Lấy class scores
-                    max_scores = np.max(class_scores, axis=1)  # Lấy điểm cao nhất cho mỗi dự đoán
-                    class_ids = np.argmax(class_scores, axis=1)  # Lấy class_id có điểm cao nhất
+                    # Parse class scores (assuming first 4 columns are bbox coords)
+                    num_classes = min(4, detections.shape[1] - 4)
+                    class_scores = detections[:, 4:4+num_classes]
+                    max_scores = np.max(class_scores, axis=1)
+                    class_ids = np.argmax(class_scores, axis=1)
                     
-                    # Lọc theo ngưỡng confidence
+                    # Filter by confidence threshold
                     mask = max_scores >= conf_threshold
                     
                     if np.any(mask):
-                        # Lấy các dự đoán vượt qua ngưỡng
+                        # Get filtered predictions
                         filtered_boxes = detections[mask, :4]  # [x, y, w, h]
                         filtered_scores = max_scores[mask]
                         filtered_class_ids = class_ids[mask]
                         
-                        # Chuyển đổi từ [x, y, w, h] sang [x1, y1, x2, y2]
+                        # Convert from [x_center, y_center, w, h] to [x1, y1, x2, y2]
                         x = filtered_boxes[:, 0]
                         y = filtered_boxes[:, 1]
                         w = filtered_boxes[:, 2]
@@ -376,136 +432,126 @@ if ONNX_AVAILABLE:
                         
                         boxes_xyxy = np.stack((x1, y1, x2, y2), axis=1)
                         
-                        # Scale về kích thước ảnh gốc
+                        # Scale to original image size
                         orig_h, orig_w = original_img.shape[:2]
                         scale_x = orig_w / self.img_size[1]
                         scale_y = orig_h / self.img_size[0]
                         
-                        # Áp dụng scale
                         boxes_xyxy[:, 0] *= scale_x
                         boxes_xyxy[:, 1] *= scale_y
                         boxes_xyxy[:, 2] *= scale_x
                         boxes_xyxy[:, 3] *= scale_y
                         
-                        # Lọc bỏ các dự đoán thuộc lớp "notumor" (lớp thứ 3, index 2)
+                        # Filter out "notumor" class (index 2)
                         non_notumor_mask = filtered_class_ids != 2
                         if np.any(non_notumor_mask):
                             boxes_xyxy = boxes_xyxy[non_notumor_mask]
                             filtered_scores = filtered_scores[non_notumor_mask]
                             filtered_class_ids = filtered_class_ids[non_notumor_mask]
                         
-                        # Tạo các box và thêm vào danh sách
+                        # Create Box objects
                         for i in range(len(filtered_scores)):
                             try:
-                                # Đảm bảo dữ liệu là mảng numpy
-                                xyxy_array = np.array([boxes_xyxy[i]])
-                                conf_array = np.array([filtered_scores[i]])
-                                cls_array = np.array([filtered_class_ids[i]])
-                                
                                 box = self.Box(
-                                    xyxy=xyxy_array,
-                                    conf=conf_array,
-                                    cls=cls_array
+                                    xyxy=np.array([boxes_xyxy[i]]),
+                                    conf=np.array([filtered_scores[i]]),
+                                    cls=np.array([filtered_class_ids[i]])
                                 )
                                 boxes.append(box)
                             except Exception as e:
-                                print(f"Lỗi khi tạo box thứ {i}: {str(e)}")
+                                print(f"Error creating box {i}: {str(e)}")
                         
-                        # Thêm bước Non-Maximum Suppression để loại bỏ các box trùng lặp
+                        # Apply Non-Maximum Suppression
                         if len(boxes) > 1:
                             boxes = self._apply_nms(boxes, iou_threshold=0.45)
                 else:
-                    # Xử lý các định dạng đầu ra khác nếu cần
-                    print(f"Định dạng đầu ra không được hỗ trợ: {detections.shape}")
+                    print(f"Unsupported output format: {detections.shape}")
             except Exception as e:
-                print(f"Lỗi trong hậu xử lý: {str(e)}")
+                print(f"Postprocessing error: {str(e)}")
                 import traceback
                 traceback.print_exc()
             
-            # Tạo và trả về̉ kết quả
+            # Return YOLO-compatible results
             results = [self.Results(boxes, self.names)]
             return results
         
-        def _apply_nms(self, boxes, iou_threshold=0.45):
-            """Áp dụng Non-Maximum Suppression để loại bỏ các box trùng lặp
+        def _apply_nms(self, boxes, iou_threshold: float = 0.45):
+            """
+            Apply Non-Maximum Suppression to remove duplicate detections.
             
             Args:
-                boxes: Đối tượng Boxes chứa các box phát hiện
-                iou_threshold: Ngưỡng IoU để xem xét các box là trùng lặp
+                boxes: Boxes object containing detections
+                iou_threshold: IoU threshold for considering boxes as duplicates
                 
             Returns:
-                Boxes: Các box đã lọc sau NMS
+                Filtered Boxes object after NMS
             """
             if len(boxes) <= 1:
                 return boxes
                 
-            # Tạo Boxes mới để lưu kết quả sau NMS
+            # Initialize filtered boxes
             filtered_boxes = self.Boxes()
             
-            # Chuyển đổi danh sách boxes thành mảng numpy để dễ xử lý
+            # Convert boxes to numpy arrays
             all_xyxy = []
             all_conf = []
             all_cls = []
             
-            # Thu thập tất cả boxes
             for box in boxes:
-                all_xyxy.append(box.xyxy[0])  # Lấy tọa độ box
-                all_conf.append(box.conf[0])  # Lấy confidence
-                all_cls.append(box.cls[0])    # Lấy class id
+                all_xyxy.append(box.xyxy[0])
+                all_conf.append(box.conf[0])
+                all_cls.append(box.cls[0])
             
-            # Chuyển thành mảng numpy
             all_xyxy = np.array(all_xyxy)
             all_conf = np.array(all_conf)
             all_cls = np.array(all_cls)
             
-            # Sắp xếp theo độ tin cậy giảm dần
+            # Sort by confidence (descending)
             indices = np.argsort(-all_conf)
             
-            # Áp dụng NMS
+            # Apply NMS algorithm
             keep_indices = []
             while len(indices) > 0:
-                # Lấy box có độ tin cậy cao nhất
+                # Keep box with highest confidence
                 current_idx = indices[0]
                 keep_indices.append(current_idx)
                 
-                # Nếu chỉ còn 1 box, thoát vòng lặp
                 if len(indices) == 1:
                     break
                 
-                # Loại bỏ box hiện tại khỏi danh sách
+                # Remove current box from candidates
                 indices = indices[1:]
                 
-                # Tính IoU giữa box hiện tại và các box còn lại
+                # Calculate IoU with remaining boxes
                 current_box = all_xyxy[current_idx]
                 remaining_boxes = all_xyxy[indices]
                 
-                # Tính diện tích các box
+                # Calculate box areaselection
                 current_area = (current_box[2] - current_box[0]) * (current_box[3] - current_box[1])
                 remaining_areas = (remaining_boxes[:, 2] - remaining_boxes[:, 0]) * (remaining_boxes[:, 3] - remaining_boxes[:, 1])
                 
-                # Tính tọa độ giao nhau
+                # Calculate intersection coordinates
                 xx1 = np.maximum(current_box[0], remaining_boxes[:, 0])
                 yy1 = np.maximum(current_box[1], remaining_boxes[:, 1])
                 xx2 = np.minimum(current_box[2], remaining_boxes[:, 2])
                 yy2 = np.minimum(current_box[3], remaining_boxes[:, 3])
                 
-                # Tính diện tích phần giao nhau
+                # Calculate intersection area
                 w = np.maximum(0, xx2 - xx1)
                 h = np.maximum(0, yy2 - yy1)
                 intersection = w * h
                 
-                # Tính IoU
+                # Calculate IoU
                 union = current_area + remaining_areas - intersection
-                iou = intersection / (union + 1e-6)  # Thêm epsilon để tránh chia cho 0
+                iou = intersection / (union + 1e-6)  # Add epsilon to avoid division by zero
                 
-                # Lọc ra các box có IoU nhỏ hơn ngưỡng
-                # Chỉ giữ lại các box có cùng class với box hiện tại
+                # Keep boxes with low IoU or different class
                 same_class = all_cls[indices] == all_cls[current_idx]
                 low_iou = iou < iou_threshold
                 mask = np.logical_or(low_iou, ~same_class)
                 indices = indices[mask]
             
-            # Tạo boxes mới từ các indices đã giữ lại
+            # Create final boxes from kept indices
             for idx in keep_indices:
                 box = self.Box(
                     xyxy=np.array([all_xyxy[idx]]),

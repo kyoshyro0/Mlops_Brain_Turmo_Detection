@@ -1,73 +1,95 @@
+"""
+Streamlit frontend for Brain Tumor Detection.
+
+Communicates with the FastAPI backend to run inference and display results.
+Provides a sidebar toggle to switch between PyTorch and ONNX models.
+"""
+
 import streamlit as st
 import os
-import numpy as np
 import requests
 from PIL import Image, ImageDraw
 import io
 import hashlib
 import time
 
-# Thiết lập cấu hình trang
-st.set_page_config(
-    page_title="Brain Tumor Detection",
-    page_icon="🔍",
-    layout="wide"
-)
+# ── Configuration ──────────────────────────────────────────────────────────────
 
-# Endpoint API - lấy từ biến môi trường hoặc sử dụng giá trị mặc định
 API_URL = os.environ.get("API_URL", "http://localhost:8000")
-
-# Tiêu đề và mô tả
-st.title("Brain Tumor Detection")
-st.markdown("Upload an image to detect brain tumors using YOLOv11s model")
-
-# Thanh bên
-st.sidebar.title("Settings")
-confidence = st.sidebar.slider("Confidence Threshold", 0.0, 1.0, 0.5, 0.05)
-# checkbox
-use_onnx = st.sidebar.checkbox("Use ONNX model (faster inference)", value=False)
-
-# Khởi tạo session state để lưu cache
-if 'prediction_cache' not in st.session_state:
-    st.session_state.prediction_cache = {}
-    
-# Giới hạn kích thước cache
 MAX_CACHE_ENTRIES = 20
+MAX_IMAGE_SIZE = 640
 
-# Kiểm tra xem API có đang chạy không
-try:
-    response = requests.get(f"{API_URL}/")
-    if response.status_code == 200:
-        # Hiển thị thông tin về model đang được sử dụng
-        model_info_response = requests.get(f"{API_URL}/model-info", params={"use_onnx": use_onnx})
-        if model_info_response.status_code == 200:
-            model_info = model_info_response.json()
-            model_type = model_info.get('model_type', 'Unknown')
-            st.success(f"✅ API is running with {model_type} model")
+
+# ── UI Components ──────────────────────────────────────────────────────────────
+
+def setup_page():
+    """Configure page settings."""
+    st.set_page_config(
+        page_title="Brain Tumor Detection",
+        page_icon="🧠",
+        layout="wide",
+    )
+    st.title("🧠 Brain Tumor Detection")
+    st.markdown("Upload an MRI image to detect brain tumors using YOLOv11s")
+
+
+def render_sidebar():
+    """Render sidebar with model settings. Returns (confidence, use_onnx)."""
+    st.sidebar.title("⚙️ Settings")
+
+    confidence = st.sidebar.slider(
+        "Confidence Threshold", 0.0, 1.0, 0.5, 0.05,
+    )
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🔄 Model Backend")
+    use_onnx = st.sidebar.toggle(
+        "Use ONNX (faster CPU inference)",
+        value=False,
+        help="Toggle to switch between PyTorch (GPU-optimised) and ONNX (CPU-optimised) backends.",
+    )
+
+    # Show current model info
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📊 Model Status")
+    try:
+        resp = requests.get(f"{API_URL}/model-info", timeout=3)
+        if resp.status_code == 200:
+            info = resp.json()
+            active_backend = "ONNX" if use_onnx and info.get("onnx_available") else "PyTorch"
+            st.sidebar.info(f"**Source:** {info.get('model_source', 'Unknown')}")
+            st.sidebar.info(f"**Active backend:** {active_backend}")
+            if not info.get("onnx_available") and use_onnx:
+                st.sidebar.warning("⚠️ ONNX not available, will fallback to PyTorch")
         else:
-            st.success("✅ API is running and ready for predictions")
-    else:
-        st.error("❌ API is not responding correctly")
-except requests.exceptions.ConnectionError:
-    st.error("❌ Cannot connect to API. Please make sure the API server is running.")
+            st.sidebar.warning("Cannot fetch model info")
+    except requests.exceptions.RequestException:
+        st.sidebar.error("API not reachable")
 
-# Công cụ upload file
-uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
+    return confidence, use_onnx
 
-if uploaded_file is not None:
-    # Tạo khóa cache dựa trên nội dung file và cài đặt
-    file_bytes = uploaded_file.getvalue()
-    settings_str = f"{confidence}_{use_onnx}"
-    cache_key = hashlib.md5(file_bytes + settings_str.encode()).hexdigest()
-    
-    # Chuyển đổi file đã upload thành ảnh
-    image = Image.open(uploaded_file)
-    
-    # Resize ảnh trước khi gửi đến API để giảm thời gian truyền
-    max_size = 640  # Kích thước tối đa phù hợp với YOLO
+
+def check_api_status():
+    """Check API connectivity."""
+    try:
+        response = requests.get(f"{API_URL}/health", timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            gpu = data.get("gpu_name", "CPU only")
+            st.success(f"✅ API running — GPU: {gpu}")
+        else:
+            st.error("❌ API not responding correctly")
+    except requests.exceptions.ConnectionError:
+        st.error("❌ Cannot connect to API. Make sure the API server is running.")
+    except requests.exceptions.Timeout:
+        st.warning("⏳ API is starting up (loading model). Please refresh in a few seconds.")
+
+
+# ── Logic & Processing ─────────────────────────────────────────────────────────
+
+def resize_image(image, max_size=MAX_IMAGE_SIZE):
+    """Resize image maintaining aspect ratio."""
     orig_width, orig_height = image.size
-    
-    # Chỉ resize nếu ảnh lớn hơn kích thước tối đa
     if max(orig_width, orig_height) > max_size:
         if orig_width > orig_height:
             new_width = max_size
@@ -75,191 +97,164 @@ if uploaded_file is not None:
         else:
             new_height = max_size
             new_width = int(orig_width * (max_size / orig_height))
-        
-        # Lưu tỷ lệ để khôi phục bounding box sau này
+
+        image_resized = image.resize((new_width, new_height), Image.LANCZOS)
         scale_x = orig_width / new_width
         scale_y = orig_height / new_height
-        
-        # Resize ảnh
-        image_resized = image.resize((new_width, new_height), Image.LANCZOS)
-    else:
-        image_resized = image
-        scale_x = scale_y = 1.0
-    
-    # Tạo cột cho ảnh gốc và ảnh đã xử lý
-    col1, col2 = st.columns(2)
-    
-    # Hiển thị ảnh gốc trong cột 1
-    with col1:
-        st.subheader("Original Image")
-        st.image(image, caption="Uploaded Image", use_container_width=True)
-    
-    # Kiểm tra cache nhưng không hiển thị thông báo ở đây
-    if cache_key in st.session_state.prediction_cache:
-        predictions = st.session_state.prediction_cache[cache_key]
-        error_message = None
-        is_from_cache = True
-    else:
-        is_from_cache = False
-        # Hiển thị spinner trong khi đang xử lý
-        with st.spinner('Detecting tumors...'):
-            # Chuẩn bị ảnh cho API request - tối ưu định dạng
-            img_byte_arr = io.BytesIO()
-            
-            # Chuyển đổi từ RGBA sang RGB nếu cần
-            if image_resized.mode == 'RGBA':
-                image_resized_rgb = image_resized.convert('RGB')
-            else:
-                image_resized_rgb = image_resized
-                
-            image_resized_rgb.save(img_byte_arr, format='JPEG', quality=85)
-            img_byte_arr = img_byte_arr.getvalue()
+        return image_resized, scale_x, scale_y
+    return image, 1.0, 1.0
 
-            try:
-                # Tạo request dự đoán đến API với tham số ONNX và confidence
-                files = {"file": ("image.jpg", img_byte_arr, "image/jpeg")}
-                params = {
-                    "use_onnx": use_onnx,  # Gửi boolean trực tiếp thay vì chuỗi
-                    "confidence": confidence  # Thêm tham số confidence
-                }
-                
-                # Đo thời gian phản hồi
-                start_time = time.time()
-                
-                # Thêm retry logic
-                max_retries = 3
-                retry_count = 0
-                while retry_count < max_retries:
-                    try:
-                        response = requests.post(f"{API_URL}/predict", files=files, params=params, timeout=30)
-                        break
-                    except requests.exceptions.RequestException:
-                        retry_count += 1
-                        if retry_count == max_retries:
-                            raise
-                        st.warning(f"Retrying request ({retry_count}/{max_retries})...")
-                        time.sleep(1)
-                
-                processing_time = time.time() - start_time
-                
-                if response.status_code == 200:
-                    response_data = response.json()
-                    
-                    # Kiểm tra xem có thông báo lỗi trong phản hồi không
-                    error_message = None
-                    if "error" in response_data:
-                        error_message = response_data["error"]
-                    elif "detail" in response_data:
-                        error_message = response_data["detail"]
-                    
-                    predictions = response_data.get("predictions", [])
-                    
-                    # Lưu kết quả vào cache chỉ khi không có lỗi
-                    if not error_message:
-                        # Quản lý kích thước cache
-                        if len(st.session_state.prediction_cache) >= MAX_CACHE_ENTRIES:
-                            # Xóa entry đầu tiên (oldest)
-                            oldest_key = next(iter(st.session_state.prediction_cache))
-                            del st.session_state.prediction_cache[oldest_key]
-                        
-                        st.session_state.prediction_cache[cache_key] = predictions
-                else:
-                    st.error(f"Error from API: {response.text}")
-                    predictions = []
-                    error_message = response.text
-            except requests.exceptions.RequestException as e:
-                st.error(f"Error communicating with API: {str(e)}")
-                predictions = []
-                error_message = str(e)
-    
-    # Tạo bản sao của ảnh để vẽ lên
+
+def get_cache_key(file_bytes, confidence, use_onnx):
+    """Generate unique cache key."""
+    settings_str = f"{confidence}_{use_onnx}"
+    return hashlib.md5(file_bytes + settings_str.encode()).hexdigest()
+
+
+def make_prediction(image_bytes, use_onnx, confidence):
+    """Send prediction request to API."""
+    files = {"file": ("image.jpg", image_bytes, "image/jpeg")}
+    params = {"use_onnx": use_onnx, "confidence": confidence}
+
+    try:
+        response = requests.post(
+            f"{API_URL}/predict", files=files, params=params, timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        return {"error": str(e)}
+
+
+def draw_results(image, predictions, scale_x, scale_y, confidence_threshold):
+    """Draw bounding boxes on image."""
     result_image = image.copy()
     draw = ImageDraw.Draw(result_image)
-    
-    # Xử lý kết quả và vẽ lên ảnh
-    if predictions:
-        for pred in predictions:
-            if pred["confidence"] >= confidence:
-                # Lấy tọa độ bounding box và scale lại về kích thước ảnh gốc
-                bbox = pred["bbox"]
-                
-                # Kiểm tra kiểu dữ liệu của bbox để tránh lỗi
-                if isinstance(bbox, list) and len(bbox) == 4:
-                    x1, y1, x2, y2 = bbox
-                    
-                    # Scale tọa độ về kích thước ảnh gốc nếu đã resize
-                    if scale_x != 1.0 or scale_y != 1.0:
-                        x1 *= scale_x
-                        y1 *= scale_y
-                        x2 *= scale_x
-                        y2 *= scale_y
-                    
-                    x1, y1, x2, y2 = [int(coord) for coord in [x1, y1, x2, y2]]
-                    
-                    # Vẽ hình chữ nhật lên ảnh
-                    # Màu dựa trên class (có thể tùy chỉnh)
-                    colors = {
-                        "glioma": (255, 0, 0),      # Đỏ
-                        "meningioma": (0, 255, 0),  # Xanh lá
-                        "pituitary": (0, 0, 255),   # Xanh dương
-                        "notumor": (255, 255, 0)    # Vàng
-                    }
-                    color = colors.get(pred["class"], (255, 0, 0))
-                    
-                    # Vẽ bounding box
-                    draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
-                    
-                    # Thêm nhãn
-                    label = f"{pred['class']}: {pred['confidence']:.2f}"
-                    draw.text((x1, y1-15), label, fill=color)
-                else:
-                    # Log lỗi nếu bbox không đúng định dạng
-                    st.warning(f"Unexpected bbox format: {bbox} (type: {type(bbox).__name__})")
-    
-    # Hiển thị ảnh kết quả trong cột 2
-    with col2:
-        st.subheader("Detection Results")
-        if predictions:
-            st.image(result_image, caption="Detection Results", use_container_width=True)
+
+    colors = {
+        "glioma": (255, 0, 0),
+        "meningioma": (0, 255, 0),
+        "pituitary": (0, 0, 255),
+        "notumor": (255, 255, 0),
+    }
+
+    for pred in predictions:
+        if pred["confidence"] >= confidence_threshold:
+            bbox = pred["bbox"]
+            if isinstance(bbox, list) and len(bbox) == 4:
+                x1, y1, x2, y2 = bbox
+                x1, y1, x2, y2 = [
+                    int(c * s)
+                    for c, s in zip(
+                        [x1, y1, x2, y2],
+                        [scale_x, scale_y, scale_x, scale_y],
+                    )
+                ]
+                color = colors.get(pred["class"], (255, 0, 0))
+                draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
+                label = f"{pred['class']}: {pred['confidence']:.2f}"
+                draw.text((x1, y1 - 15), label, fill=color)
+
+    return result_image
+
+
+# ── Main Application ───────────────────────────────────────────────────────────
+
+def main():
+    setup_page()
+
+    # Session state
+    if "prediction_cache" not in st.session_state:
+        st.session_state.prediction_cache = {}
+
+    confidence, use_onnx = render_sidebar()
+    check_api_status()
+
+    uploaded_file = st.file_uploader(
+        "Choose an image...", type=["jpg", "jpeg", "png"],
+    )
+
+    if uploaded_file:
+        file_bytes = uploaded_file.getvalue()
+        cache_key = get_cache_key(file_bytes, confidence, use_onnx)
+
+        image = Image.open(uploaded_file)
+        image_resized, scale_x, scale_y = resize_image(image)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Original Image")
+            st.image(image, caption="Uploaded Image", use_container_width=True)
+
+        # Cache check
+        if cache_key in st.session_state.prediction_cache:
+            result = st.session_state.prediction_cache[cache_key]
+            is_cached = True
         else:
-            st.info("No tumors detected in the image")
-            st.image(image, caption="No tumors detected", use_container_width=True)
-    
-    # Hiển thị thông tin kết quả bên dưới cả hai ảnh (ngoài columns)
-    st.subheader("Detection Information")
-    
-    # Hiển thị thông báo cache ở đây thay vì ở trên
-    if is_from_cache:
-        st.success("✅ Retrieved result from cache")
-    else:
-        # Hiển thị thời gian xử lý và thông tin model
-        if 'processing_time' in locals():
-            st.info(f"Processing time: {processing_time:.3f} seconds")
-        
-        if 'response_data' in locals():
-            # Hiển thị thông tin model từ response
-            if "model_framework" in response_data:
-                model_framework = response_data.get('model_framework', 'Unknown')
-                model_type = response_data.get('model_type', 'Unknown')
-                
-                # Hiển thị thông tin model
-                st.success(f"Used {model_framework} model ({model_type})")
-            elif "model_type" in response_data:
-                model_type = response_data['model_type']
-                # Loại bỏ thông tin môi trường nếu có
-                if "Deployed" in model_type and "(" in model_type:
-                    model_type = "Deployed Model"
-                
-                st.success(f"Used {model_type} model")
-            
-    
-    # Hiển thị kết quả chi tiết
-    if predictions:
-        st.subheader("Detection Details")
-        for pred in predictions:
-            if pred["confidence"] >= confidence:
-                st.write(f"Class: {pred['class']} | Confidence: {pred['confidence']:.2f}")
-    
-    # Hiển thị thông báo lỗi nếu có
-    if 'error_message' in locals() and error_message:
-        st.error(f"Error from API: {error_message}")
+            is_cached = False
+            with st.spinner("Detecting tumors..."):
+                img_byte_arr = io.BytesIO()
+                image_resized.convert("RGB").save(img_byte_arr, format="JPEG")
+
+                start_time = time.time()
+                result = make_prediction(
+                    img_byte_arr.getvalue(), use_onnx, confidence,
+                )
+                processing_time = time.time() - start_time
+
+                if "error" not in result:
+                    result["client_processing_time"] = processing_time
+                    if len(st.session_state.prediction_cache) >= MAX_CACHE_ENTRIES:
+                        oldest = next(iter(st.session_state.prediction_cache))
+                        st.session_state.prediction_cache.pop(oldest)
+                    st.session_state.prediction_cache[cache_key] = result
+
+        # Display results
+        predictions = result.get("predictions", [])
+        error = result.get("error")
+
+        with col2:
+            st.subheader("Detection Results")
+            if error:
+                st.error(f"Error: {error}")
+            elif predictions:
+                result_img = draw_results(
+                    image, predictions, scale_x, scale_y, confidence,
+                )
+                st.image(
+                    result_img, caption="Detection Results",
+                    use_container_width=True,
+                )
+            else:
+                st.info("No tumors detected")
+                st.image(
+                    image, caption="No tumors detected",
+                    use_container_width=True,
+                )
+
+        # Info section
+        st.subheader("Detection Information")
+        info_cols = st.columns(3)
+        with info_cols[0]:
+            if is_cached:
+                st.success("✅ Retrieved from cache")
+            elif not error:
+                st.metric("Processing Time", f"{result.get('client_processing_time', 0):.3f}s")
+        with info_cols[1]:
+            if not error:
+                st.metric("Model", result.get("model_type", "Unknown"))
+        with info_cols[2]:
+            if not error:
+                backend = result.get("model_framework", "Unknown")
+                st.metric("Backend", backend)
+
+        # Detection details
+        if predictions:
+            st.subheader("Detection Details")
+            for p in predictions:
+                if p["confidence"] >= confidence:
+                    st.write(f"**{p['class']}**: {p['confidence']:.2f}")
+
+
+if __name__ == "__main__":
+    main()

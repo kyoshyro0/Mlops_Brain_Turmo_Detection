@@ -1,0 +1,55 @@
+# Ignore Python virtual environment and local packages
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore local datasets (crucial to prevent sending gigabytes of images to Docker daemon)
+datasets/
+data/
+
+# Ignore MLflow artifacts and local runs database
+mlruns/
+mlflow.db
+*.db
+mlflow.db-journal
+
+# Ignore local models/weights that shouldn't be baked into the base image
+models/train/
+models/eval/
+deployed_models/
+!models/train/weights/best.pt
+!models/train/weights/best.onnx
+
+# Ignore version control and IDE settings
+.git/
+.github/
+.gitignore
+.gitattributes
+.dvc/
+.dvcignore
+.vscode/
+.idea/
+
+# Ignore development notebooks, tests and documentations
+notebooks/
+tests/
+docs/
+README.md
+LICENSE
+
+# Ignore local temporary/build files and downloads
+vc_redist.x64.exe
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+python_env.yaml
+MLproject
+evaluation_results_onnx/
+evaluation_results_pt/
+evaluation_results/

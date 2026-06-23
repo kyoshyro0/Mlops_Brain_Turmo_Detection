@@ -1,10 +1,14 @@
+# ═══════════════════════════════════════════════════════════════
 # Python
+# ═══════════════════════════════════════════════════════════════
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.pyd
 .Python
-env/
+
+# Distribution / packaging
 build/
 develop-eggs/
 dist/
@@ -20,41 +24,125 @@ var/
 .installed.cfg
 *.egg
 
-# Virtual Environment
+# ═══════════════════════════════════════════════════════════════
+# Virtual environments
+# ═══════════════════════════════════════════════════════════════
+.venv/
 venv/
+env/
 ENV/
 .env
 
-# Model files (có thể rất lớn)
-*.ipynb
-*.pth
-# MLflow
-mlruns/
-mlflow.db
-
-# Logs
-logs/
-*.log
-
-# Dataset (thường rất lớn)
-data_test/
+# ═══════════════════════════════════════════════════════════════
+# Datasets (thường rất lớn — quản lý bằng DVC)
+# ═══════════════════════════════════════════════════════════════
 datasets/
+data/
+data_test/
+
+# Ignore images ở root nhưng cho phép trong examples/
 *.jpg
 *.jpeg
 *.png
+*.bmp
+*.tiff
 !examples/*.jpg
 !examples/*.jpeg
 !examples/*.png
 
-# IDE
+# ═══════════════════════════════════════════════════════════════
+# Model weights (file lớn — quản lý bằng DVC hoặc MLflow)
+# ═══════════════════════════════════════════════════════════════
+*.pt
+*.pth
+*.onnx
+*.torchscript
+*.engine
+*.tflite
+
+# Training output weights
+models/train/
+models/eval/
+
+# Deployed model cache (versioned copies, không track trong git)
+deployed_models/
+
+# ═══════════════════════════════════════════════════════════════
+# MLflow
+# ═══════════════════════════════════════════════════════════════
+mlruns/
+mlflow.db
+mlflow.db-journal
+*.db
+*.db-journal
+
+# ═══════════════════════════════════════════════════════════════
+# Jupyter Notebooks
+# ═══════════════════════════════════════════════════════════════
+*.ipynb
+# Cho phép notebooks trong thư mục notebooks/ để showcase
+!notebooks/*.ipynb
+!notebooks/**/*.ipynb
+
+# Jupyter checkpoint files
+.ipynb_checkpoints/
+
+# ═══════════════════════════════════════════════════════════════
+# Evaluation results (output từ pipeline)
+# ═══════════════════════════════════════════════════════════════
+evaluation_results/
+evaluation_results_pt/
+evaluation_results_onnx/
+monitoring_results/
+
+# ═══════════════════════════════════════════════════════════════
+# DVC — cho phép metadata, ignore data
+# ═══════════════════════════════════════════════════════════════
+!*.dvc
+/.dvc/*
+!/.dvc/config
+!/.dvc/.gitignore
+
+# ═══════════════════════════════════════════════════════════════
+# Docker
+# ═══════════════════════════════════════════════════════════════
+# Không ignore .dockerignore (cần thiết cho Docker build)
+
+# ═══════════════════════════════════════════════════════════════
+# IDE / Editor
+# ═══════════════════════════════════════════════════════════════
 .idea/
 .vscode/
 *.swp
 *.swo
+*~
 
-# Docker
-.dockerignore
+# ═══════════════════════════════════════════════════════════════
+# Testing / Linting
+# ═══════════════════════════════════════════════════════════════
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+coverage.xml
 
-# Misc
+# ═══════════════════════════════════════════════════════════════
+# Logs
+# ═══════════════════════════════════════════════════════════════
+logs/
+*.log
+
+# ═══════════════════════════════════════════════════════════════
+# OS files
+# ═══════════════════════════════════════════════════════════════
 .DS_Store
 Thumbs.db
+Desktop.ini
+
+# ═══════════════════════════════════════════════════════════════
+# Misc / Temporary downloads
+# ═══════════════════════════════════════════════════════════════
+vc_redist.x64.exe
+*.tmp
+*.bak

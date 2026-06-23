@@ -1,0 +1,189 @@
+name: brain_tumor_detection
+
+description: |
+  Brain Tumor Detection using YOLOv11s with MLOps best practices.
+  Supports training, evaluation, deployment, and monitoring workflows.
+
+# Python environment specification
+python_env: python_env.yaml
+
+entry_points:
+  # Main training workflow
+  train:
+    parameters:
+      data:
+        type: string
+        default: configs/data.yaml
+      epochs:
+        type: int
+        default: 100
+      batch_size:
+        type: int
+        default: 16
+      img_size:
+        type: int
+        default: 640
+      device:
+        type: string
+        default: "0"
+      resume:
+        type: string
+        default: "false"
+    command: |
+      python -m src.training.train \
+        --data {data} \
+        --epochs {epochs} \
+        --batch-size {batch_size} \
+        --img-size {img_size} \
+        $(if [ "{resume}" = "true" ]; then echo "--resume"; fi)
+
+  # Model evaluation
+  evaluate:
+    parameters:
+      model_path:
+        type: path
+        default: models/train/weights/best.pt
+      data:
+        type: string
+        default: configs/data.yaml
+      img_size:
+        type: int
+        default: 640
+      batch_size:
+        type: int
+        default: 16
+      conf_thres:
+        type: float
+        default: 0.25
+      output_dir:
+        type: string
+        default: evaluation_results
+    command: |
+      python -m src.evaluation.evaluate \
+        --model-path {model_path} \
+        --data-yaml {data} \
+        --img-size {img_size} \
+        --batch-size {batch_size} \
+        --conf-thres {conf_thres} \
+        --output-dir {output_dir}
+
+  # ONNX export
+  export_onnx:
+    parameters:
+      model_path:
+        type: path
+        default: models/train/weights/best.pt
+      dynamic:
+        type: string
+        default: "true"
+      simplify:
+        type: string
+        default: "true"
+    command: |
+      python -m src.utils.onnx_export \
+        --model {model_path} \
+        $(if [ "{dynamic}" = "true" ]; then echo "--dynamic"; else echo "--no-dynamic"; fi) \
+        $(if [ "{simplify}" = "true" ]; then echo "--simplify"; else echo "--no-simplify"; fi)
+
+  # Model registration
+  register:
+    parameters:
+      run_id:
+        type: string
+      model_name:
+        type: string
+        default: brain_tumor_detector
+      stage:
+        type: string
+        default: Staging
+      description:
+        type: string
+        default: ""
+    command: |
+      python -m src.deployment.register_model register \
+        --run-id {run_id} \
+        --model-name {model_name} \
+        --stage {stage} \
+        $(if [ -n "{description}" ]; then echo "--description '{description}'"; fi)
+
+  # Model deployment
+  deploy:
+    parameters:
+      model_name:
+        type: string
+        default: brain_tumor_detector
+      version:
+        type: int
+        default: 0
+      stage:
+        type: string
+        default: Production
+      env:
+        type: string
+        default: production
+    command: |
+      python -m src.deployment.deploy_model deploy \
+        --model-name {model_name} \
+        $(if [ {version} -gt 0 ]; then echo "--version {version}"; else echo "--stage {stage}"; fi) \
+        --env {env}
+
+  # Model monitoring
+  monitor:
+    parameters:
+      model_path:
+        type: path
+        default: models/train/weights/best.pt
+      test_data:
+        type: path
+      output_dir:
+        type: string
+        default: monitoring_results
+    command: |
+      python -m src.monitoring.monitor_model \
+        --model-path {model_path} \
+        --test-data {test_data} \
+        --output-dir {output_dir}
+
+  # Full MLOps pipeline
+  pipeline:
+    parameters:
+      data:
+        type: string
+        default: configs/data.yaml
+      epochs:
+        type: int
+        default: 100
+      batch_size:
+        type: int
+        default: 16
+      register_model:
+        type: string
+        default: "true"
+      deploy_model:
+        type: string
+        default: "false"
+      deployment_stage:
+        type: string
+        default: Staging
+    command: |
+      python -m src.pipeline.run_pipeline \
+        --data {data} \
+        --epochs {epochs} \
+        --batch-size {batch_size} \
+        --register {register_model} \
+        --deploy {deploy_model} \
+        --stage {deployment_stage}
+
+  # Default entry point (training)
+  main:
+    parameters:
+      data:
+        type: string
+        default: configs/data.yaml
+      epochs:
+        type: int
+        default: 100
+    command: |
+      python -m src.training.train \
+        --data {data} \
+        --epochs {epochs}

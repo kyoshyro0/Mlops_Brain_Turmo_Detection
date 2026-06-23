@@ -1,4 +1,4 @@
-from model import train_model
+from src.utils.model import train_model
 import argparse
 import os
 
@@ -26,9 +26,10 @@ def main():
         resume_path=args.resume_path,
         run_id=args.run_id
     )
-    
-    print(f"Training completed. Results: {results}")
-    print(f"MLflow run ID: {run_id}")
+
+    print(f"Training completed. MLflow run ID: {run_id}")
+    print(f"Run full pipeline (validate + export + register):")
+    print(f"  python -m src.pipeline.pipeline --data {args.data} --epochs {args.epochs}")
 
 if __name__ == '__main__':
-    main()
+    main()

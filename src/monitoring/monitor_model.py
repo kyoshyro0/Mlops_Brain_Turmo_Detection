@@ -1,26 +1,38 @@
+"""
+Model performance monitoring utilities.
+
+This module provides functions to monitor model performance on test data,
+track metrics over time, and log results to MLflow.
+"""
+
 import os
-import argparse
+import glob
 import json
 import datetime
-import numpy as np
+import argparse
 import cv2
+import numpy as np
 import mlflow
-from model import load_model, predict
-import glob
 
-def monitor_model(model_path, test_data_dir, output_dir="monitoring_results"):
+from src.utils.model import load_model, predict
+
+
+def monitor_model(model_path: str, test_data_dir: str, output_dir: str = "monitoring_results"):
     """
-    Monitor model performance on test data
+    Monitor model performance on test data and log metrics.
     
     Args:
-        model_path (str): Path to the model file
-        test_data_dir (str): Directory containing test data
-        output_dir (str): Directory to save monitoring results
+        model_path: Path to the model file
+        test_data_dir: Directory containing test data
+        output_dir: Directory to save monitoring results
+        
+    Returns:
+        Tuple of (metrics dict, MLflow run ID)
     """
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
     
-    # Set up MLflow
+    # Setup MLflow
     mlflow.set_tracking_uri("sqlite:///mlflow.db")
     mlflow.set_experiment("model_monitoring")
     
@@ -126,6 +138,7 @@ def monitor_model(model_path, test_data_dir, output_dir="monitoring_results"):
         print(f"Class distribution: {class_counts}")
         
         return metrics, run.info.run_id
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Monitor model performance on test data")
